@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
+from scipy import special
 from IPython.display import display
 from itertools import combinations
 
@@ -211,7 +212,7 @@ def paired_ttest_analysis(data, col1='Na2O в основе', col2='Na2O в гл�
     test = stats.ttest_rel(series2, series1)
     interval = test.confidence_interval(confidence_level=confidence_level)
     
-    print(f'Шапиро — Уилк для разностей: p = {normality.pvalue:.4f}')
+    print(f'Шапиро-Уилк для разностей: p = {normality.pvalue:.4f}')
     print(f'Средняя разность: {difference.mean():.3f} п.п.')
     print(f'Парный t-тест: t = {test.statistic:.3f}, p = {test.pvalue:.4f}')
     print(f'{int(confidence_level*100)}%-й доверительный интервал: от {interval.low:.3f} до {interval.high:.3f} п.п.')
@@ -225,3 +226,170 @@ def paired_ttest_analysis(data, col1='Na2O в основе', col2='Na2O в гл�
         'ci_high': interval.high
     }
 
+
+real_na_glaze = data['Na₂O в глазури'].to_numpy(dtype=float)
+k_hat, loc_hat, theta_hat = stats.gamma.fit(real_na_glaze, floc=0)
+assert loc_hat == 0 and k_hat > 0 and theta_hat > 0
+
+print(f'n = {len(real_na_glaze)}; k = {k_hat:.6f}; θ = {theta_hat:.6f} масс. %')
+print(f'Теория: E[X] = {k_hat * theta_hat:.4f} масс. %; '
+      f'Var[X] = {k_hat * theta_hat**2:.4f} (масс. %)^2')
+
+
+def normal_box_muller(size, rng):
+    """Стандартные нормальные значения из независимых равномерных чисел."""
+    u1 = 1.0 - rng.random(size)
+    u2 = rng.random(size)
+    return np.sqrt(-2.0 * np.log(u1)) * np.cos(2.0 * np.pi * u2)
+
+def gamma_marsaglia_tsang(k, theta, size, rng, diagnostics=False):
+    """Независимые Gamma(k, theta) методом принятия и отклонения.
+
+    Parameters
+    ----------
+    k : float                 Параметр формы, строго положительный.
+    theta : float             Масштаб, строго положительный.
+    size : int                Число значений, неотрицательное целое.
+    rng : numpy.random.Generator
+    diagnostics : bool        Если True, вернуть также число кандидатов.
+    """
+    if not np.isfinite(k) or k <= 0 or not np.isfinite(theta) or theta <= 0:
+        raise ValueError('k и theta должны быть конечными положительными числами')
+    if isinstance(size, bool) or not isinstance(size, (int, np.integer)) or size < 0:
+        raise ValueError('size должен быть неотрицательным целым числом')
+    if not isinstance(rng, np.random.Generator):
+        raise TypeError('rng должен быть numpy.random.Generator')
+
+    effective_k = k if k >= 1 else k + 1
+    d = effective_k - 1.0 / 3.0
+    c = 1.0 / np.sqrt(9.0 * d)
+    result = np.empty(size, dtype=float)
+    pending = np.arange(size)
+    proposals = 0
+
+    while pending.size:
+        z = normal_box_muller(pending.size, rng)
+        u = 1.0 - rng.random(pending.size)
+        w = 1.0 + c * z
+        valid = w > 0
+        # Для отклонённых w<=0 подставляем v=1, чтобы не вычислять log(v<=0).
+        v = np.where(valid, w**3, 1.0)
+        log_ratio = 0.5 * z**2 + d * (1.0 - v + np.log(v))
+        accepted = valid & (np.log(u) < log_ratio)
+        result[pending[accepted]] = d * v[accepted]
+        proposals += pending.size
+        pending = pending[~accepted]
+
+    if k < 1:
+        result *= (1.0 - rng.random(size)) ** (1.0 / k)
+    result *= theta
+    return (result, proposals) if diagnostics else result
+
+
+generated, proposals = gamma_marsaglia_tsang(
+    k_hat, theta_hat, 50_000, np.random.default_rng(20261111), diagnostics=True
+)
+print(f'Получено {len(generated):,} значений из {proposals:,} кандидатов; '
+      f'доля принятых = {len(generated) / proposals:.3%}')
+print('Первые десять значений, масс. %:', np.round(generated[:10], 3))
+
+
+seed = 7341
+a = gamma_marsaglia_tsang(k_hat, theta_hat, 1000, np.random.default_rng(seed))
+b = gamma_marsaglia_tsang(k_hat, theta_hat, 1000, np.random.default_rng(seed))
+assert np.array_equal(a, b)
+assert len(a) == 1000 and np.all(np.isfinite(a)) and np.all(a > 0)
+assert gamma_marsaglia_tsang(1, 1, 0, np.random.default_rng(seed)).size == 0
+
+for bad in [(0, 1, 10), (1, 0, 10), (1, 1, -1), (1, 1, 2.5)]:
+    try:
+        gamma_marsaglia_tsang(*bad, rng=np.random.default_rng(seed))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f'Аргументы {bad} должны вызывать ValueError')
+
+test_rows = []
+for test_k, test_theta in [(0.6, 0.8), (1.0, 0.8), (k_hat, theta_hat), (4.0, 0.8)]:
+    draws = gamma_marsaglia_tsang(test_k, test_theta, 40_000,
+                                  np.random.default_rng(7300 + round(100 * test_k)))
+    theory_mean = test_k * test_theta
+    theory_var = test_k * test_theta**2
+    D, p = stats.kstest(draws, 'gamma', args=(test_k, 0, test_theta))
+    mean_error_se = abs(draws.mean() - theory_mean) / np.sqrt(theory_var / len(draws))
+    var_relative_error = abs(draws.var(ddof=1) / theory_var - 1)
+    lag1 = np.corrcoef(draws[:-1], draws[1:])[0, 1]
+    assert mean_error_se < 5
+    assert var_relative_error < 0.08
+    assert D < 2 / np.sqrt(len(draws))
+    assert abs(lag1) < 0.04
+    test_rows.append([test_k, test_theta, mean_error_se, var_relative_error, D, p, lag1])
+
+tests = pd.DataFrame(test_rows, columns=[
+    'k', 'θ', '|ошибка среднего| / SE', 'Отн. ошибка дисперсии', 'KS D', 'KS p', 'r соседних'
+])
+display(tests.round(4))
+print('Все автопроверки пройдены.')
+
+
+def sample_metrics(x, axis=None):
+    return {
+        'Среднее, масс. %': np.mean(x, axis=axis),
+        'Дисперсия, (масс. %)^2': np.var(x, axis=axis, ddof=1),
+        'Медиана, масс. %': np.median(x, axis=axis),
+        'Q10, масс. %': np.quantile(x, 0.10, axis=axis),
+        'Q90, масс. %': np.quantile(x, 0.90, axis=axis),
+    }
+
+n_real = len(real_na_glaze)
+replications = 5000
+replicated = gamma_marsaglia_tsang(
+    k_hat, theta_hat, replications * n_real, np.random.default_rng(4401)
+).reshape(replications, n_real)
+real_metrics = sample_metrics(real_na_glaze)
+generator_metrics = sample_metrics(generated)
+replicated_metrics = sample_metrics(replicated, axis=1)
+
+comparison_rows = []
+for name, observed in real_metrics.items():
+    lower, upper = np.quantile(replicated_metrics[name], [0.025, 0.975])
+    comparison_rows.append([
+        name, observed, generator_metrics[name], lower, upper,
+        'да' if lower <= observed <= upper else 'нет'
+    ])
+comparison_s2 = pd.DataFrame(comparison_rows, columns=[
+    'Метрика', 'CSV (n=44)', 'Генератор (n=50 000)',
+    'Нижняя граница 95%', 'Верхняя граница 95%', 'CSV внутри?'
+]).set_index('Метрика')
+display(comparison_s2.round(4))
+
+ks_generator = stats.kstest(generated, 'gamma', args=(k_hat, 0, theta_hat))
+print(f'KS для генератора против заданной Gamma(k, θ): '
+      f'D={ks_generator.statistic:.4f}, p={ks_generator.pvalue:.4f}')
+
+
+grid = np.linspace(0, max(real_na_glaze.max(), np.quantile(generated, 0.995)) * 1.06, 350)
+fig, axes = plt.subplots(1, 2, figsize=(11, 4), layout='constrained')
+
+axes[0].hist(real_na_glaze, bins=10, density=True, alpha=0.55,
+             edgecolor='white', label='CSV: 44 образца')
+axes[0].hist(generated, bins=55, density=True, alpha=0.32,
+             edgecolor='none', label='Генератор: 50 000')
+axes[0].plot(grid, stats.gamma.pdf(grid, k_hat, scale=theta_hat),
+             color='black', lw=1.8, label='Плотность модели')
+axes[0].set(xlabel='Na₂O в глазури, масс. %', ylabel='Плотность',
+            title='Форма распределения', xlim=(0, grid.max()))
+axes[0].legend(fontsize=8)
+
+real_sorted = np.sort(real_na_glaze)
+sim_sorted = np.sort(generated)
+axes[1].step(real_sorted, np.arange(1, n_real + 1) / n_real,
+             where='post', label='Эмпирическая F: CSV')
+axes[1].step(sim_sorted, np.arange(1, len(generated) + 1) / len(generated),
+             where='post', alpha=0.75, label='Эмпирическая F: генератор')
+axes[1].plot(grid, stats.gamma.cdf(grid, k_hat, scale=theta_hat),
+             color='black', lw=1.8, label='F модели')
+axes[1].set(xlabel='Na₂O в глазури, масс. %', ylabel='F(x)',
+            title='Функция распределения', xlim=(0, grid.max()), ylim=(0, 1.02))
+axes[1].legend(fontsize=8)
+plt.show()

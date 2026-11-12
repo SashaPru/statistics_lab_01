@@ -393,3 +393,13 @@ axes[1].set(xlabel='Na₂O в глазури, масс. %', ylabel='F(x)',
             title='Функция распределения', xlim=(0, grid.max()), ylim=(0, 1.02))
 axes[1].legend(fontsize=8)
 plt.show()
+
+def fit_gamma_distribution(data, column_name):
+    """Подбирает параметры гамма-расделения для заданного столбца."""
+    values = data[column_name].to_numpy(dtype=float)
+    k_hat, loc_hat, theta_hat = stats.gamma.fit(values, floc=0)
+    
+    # Проверка корректности подбора
+    assert loc_hat == 0 and k_hat > 0 and theta_hat > 0, "Ошибка подбора параметров гамма-распределения"
+    
+    return k_hat, loc_hat, theta_hat

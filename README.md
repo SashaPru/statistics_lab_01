@@ -636,7 +636,7 @@ print(f'95%-й доверительный интервал: от {interval.low:.
 #### Математический анализ
 
 Для $X \sim \Gamma(k,\theta)$ плотность и первые два момента равны:
-$$f_X(x)=\frac{x^{k-1}e^{-x/\theta}}{\Gamma(k)\theta^k},\quad x>0; \qquad \mathbb{E}[X]=k\theta,\quad \mathrm{Var}[X]=k \theta^2.$$
+$$\qquad f_X(x)=\frac{x^{k-1}e^{-x/\theta}}{\Gamma(k)\theta^k},\quad x>0; \qquad \mathbb{E}[X]=k\theta,\quad \mathrm{Var}[X]=k \theta^2.$$
 
 Здесь $k$ безразмерен, $\theta$ измеряется в масс. %, дисперсия — в $(\text{масс. \%})^2$. Сначала получаем $Y \sim \Gamma(k,1)$, затем $X=\theta Y$. Оценку $k,\theta$ берём из `scipy.stats.gamma.fit(..., floc=0)`; именно такой способ применён в первом спринте.
 

@@ -69,18 +69,17 @@ plt.ylabel('Плотность')
 plt.legend()
 plt.show()
 
-pairs_to_plot = [(0, 2), (1, 3), (0, 1), (2, 3)]
-fig, axes = plt.subplots(2, 2, figsize=(8, 5.5), layout='constrained')
-
-for ax, (first, second) in zip(axes.flat, pairs_to_plot):
-    x = data.iloc[:, first]
-    y = data.iloc[:, second]
-    ax.scatter(x, y, alpha=0.75)
-    ax.set(xlabel=f'{x.name}, масс. %', ylabel=f'{y.name}, масс. %',
-           title=f'r = {x.corr(y):.3f}')
-
-plt.show()
-
+def plot_pairs(data, pairs_to_plot):
+    fig, axes = plt.subplots(2, 2, figsize=(8, 5.5), layout='constrained')
+    
+    for ax, (first, second) in zip(axes.flat, pairs_to_plot):
+        x = data.iloc[:, first]
+        y = data.iloc[:, second]
+        ax.scatter(x, y, alpha=0.75)
+        ax.set(xlabel=f'{x.name}, масс. %', ylabel=f'{y.name}, масс. %',
+               title=f'r = {x.corr(y):.3f}')
+    
+    plt.show()
 
 def centered_distances(values):
     distances = np.abs(values[:, None] - values[None, :])
@@ -88,119 +87,141 @@ def centered_distances(values):
     column_means = distances.mean(axis=0)
     return distances - row_means - column_means + distances.mean()
 
-
-rng = np.random.default_rng(301)
-orders = [rng.permutation(len(data)) for _ in range(4999)]
-results = []
-
-for first, second in combinations(data.columns, 2):
-    a = centered_distances(data[first].to_numpy())
-    b = centered_distances(data[second].to_numpy())
-    observed = (a * b).mean()
-
-    at_least_as_large = 0
-    for order in orders:
-        shuffled = b[np.ix_(order, order)]
-        if (a * shuffled).mean() >= observed - 1e-12:
-            at_least_as_large += 1
-
-    p = (at_least_as_large + 1) / (len(orders) + 1)
-    results.append([first, second, data[first].corr(data[second]), p])
-
-dependence = pd.DataFrame(results, columns=['Величина 1', 'Величина 2', 'r Пирсона', 'p'])
-
-
-dependence = dependence.sort_values('p', ignore_index=True)
-number_of_tests = len(dependence)
-multipliers = range(number_of_tests, 0, -1)
-adjusted = dependence['p'] * list(multipliers)
-dependence['p с поправкой Холма'] = adjusted.cummax().clip(upper=1)
-dependence.round(4)
+def test_independence(data, n_permutations=4999, seed=301):
+    from itertools import combinations
+    
+    rng = np.random.default_rng(seed)
+    orders = [rng.permutation(len(data)) for _ in range(n_permutations)]
+    results = []
+    
+    for first, second in combinations(data.columns, 2):
+        a = centered_distances(data[first].to_numpy())
+        b = centered_distances(data[second].to_numpy())
+        observed = (a * b).mean()
+        
+        at_least_as_large = 0
+        for order in orders:
+            shuffled = b[np.ix_(order, order)]
+            if (a * shuffled).mean() >= observed - 1e-12:
+                at_least_as_large += 1
+        
+        p = (at_least_as_large + 1) / (len(orders) + 1)
+        results.append([first, second, data[first].corr(data[second]), p])
+    
+    return pd.DataFrame(results, columns=['Величина 1', 'Величина 2', 'r Пирсона', 'p'])
 
 
-N = len(data)
-full_mean = data.mean()
-full_variance = data.var(ddof=0)
-methods = {True: 'С возвращением', False: 'Без возвращения'}
-rng = np.random.default_rng(91)
-
-comparison = pd.DataFrame({'Среднее по CSV': full_mean, 'Дисперсия по CSV': full_variance})
-
-for replace, method in methods.items():
-    indices = rng.choice(N, size=20, replace=replace)
-    sample = data.iloc[indices]
-    variance = sample.var(ddof=1)
-    if not replace:
-        variance *= (N - 1) / N
-
-    print(f'{method}: {sample.index.nunique()} разных образцов из 20.')
-    comparison[f'Среднее · {method.lower()}'] = sample.mean()
-    comparison[f'Дисперсия · {method.lower()}'] = variance
-
-display(comparison.filter(like='Среднее').round(4))
-display(comparison.filter(like='Дисперсия').round(4))
+def holm_correction(dependence):
+    dependence = dependence.sort_values('p', ignore_index=True)
+    number_of_tests = len(dependence)
+    multipliers = range(number_of_tests, 0, -1)
+    adjusted = dependence['p'] * list(multipliers)
+    dependence['p с поправкой Холма'] = adjusted.cummax().clip(upper=1)
+    return dependence.round(4)
 
 
-def rmse(estimates, target):
-    return np.sqrt(((estimates - target) ** 2).mean(axis=0))
-
-
-rng = np.random.default_rng(2026)
-sizes = [5, 10, 20, 30, N]
-repeats = 2000
-values = data.to_numpy()
-errors = {}
-
-for replace, method in methods.items():
-    mean_errors = []
-    variance_errors = []
-    for n in sizes:
-        if replace:
-            indices = rng.integers(N, size=(repeats, n))
-        else:
-            indices = np.array([rng.choice(N, size=n, replace=False) for _ in range(repeats)])
-
-        samples = values[indices]
-        sample_means = samples.mean(axis=1)
-        sample_variances = samples.var(axis=1, ddof=1)
+def compare_sampling(data, sample_size=20, seed=91):
+    N = len(data)
+    full_mean = data.mean()
+    full_variance = data.var(ddof=0)
+    methods = {True: 'С возвращением', False: 'Без возвращения'}
+    rng = np.random.default_rng(seed)
+    
+    comparison = pd.DataFrame({'Среднее по CSV': full_mean, 'Дисперсия по CSV': full_variance})
+    
+    for replace, method in methods.items():
+        indices = rng.choice(N, size=sample_size, replace=replace)
+        sample = data.iloc[indices]
+        variance = sample.var(ddof=1)
         if not replace:
-            sample_variances *= (N - 1) / N
-
-        mean_errors.append(rmse(sample_means, full_mean.to_numpy()))
-        variance_errors.append(rmse(sample_variances, full_variance.to_numpy()))
-
-    errors[method] = np.array(mean_errors), np.array(variance_errors)
-
-assert np.allclose(errors['Без возвращения'][0][-1], 0)
-assert np.allclose(errors['Без возвращения'][1][-1], 0)
-
-
-fig, axes = plt.subplots(4, 2, figsize=(8, 10), layout='constrained', sharex=True)
-
-for i, name in enumerate(data.columns):
-    for method, (mean_errors, variance_errors) in errors.items():
-        axes[i, 0].plot(sizes, mean_errors[:, i], 'o-', label=method)
-        axes[i, 1].plot(sizes, variance_errors[:, i], 'o-', label=method)
-    axes[i, 0].set(title=f'{name} · среднее', ylabel='RMSE, п.п.')
-    axes[i, 1].set(title=f'{name} · дисперсия', ylabel='RMSE, (п.п.)²')
-
-axes[0, 0].legend(fontsize=8)
-for ax in axes[-1]:
-    ax.set(xlabel='Размер выборки', xticks=sizes)
-
-plt.show()
+            variance *= (N - 1) / N
+        
+        print(f'{method}: {sample.index.nunique()} разных образцов из {sample_size}.')
+        comparison[f'Среднее · {method.lower()}'] = sample.mean()
+        comparison[f'Дисперсия · {method.lower()}'] = variance
+    
+    display(comparison.filter(like='Среднее').round(4))
+    display(comparison.filter(like='Дисперсия').round(4))
+    
+    return comparison
 
 
-sodium_body = data['Na₂O в основе']
-sodium_glaze = data['Na₂O в глазури']
-difference = sodium_glaze - sodium_body
+def compute_rmse_errors(data, sizes=None, repeats=2000, seed=2026):
+    N = len(data)
+    full_mean = data.mean()
+    full_variance = data.var(ddof=0)
+    methods = {True: 'С возвращением', False: 'Без возвращения'}
+    
+    if sizes is None:
+        sizes = [5, 10, 20, 30, N]
+    
+    rng = np.random.default_rng(seed)
+    values = data.to_numpy()
+    errors = {}
+    
+    for replace, method in methods.items():
+        mean_errors = []
+        variance_errors = []
+        for n in sizes:
+            if replace:
+                indices = rng.integers(N, size=(repeats, n))
+            else:
+                indices = np.array([rng.choice(N, size=n, replace=False) for _ in range(repeats)])
+            
+            samples = values[indices]
+            sample_means = samples.mean(axis=1)
+            sample_variances = samples.var(axis=1, ddof=1)
+            if not replace:
+                sample_variances *= (N - 1) / N
+            
+            mean_errors.append(np.sqrt(((sample_means - full_mean.to_numpy()) ** 2).mean(axis=0)))
+            variance_errors.append(np.sqrt(((sample_variances - full_variance.to_numpy()) ** 2).mean(axis=0)))
+        
+        errors[method] = np.array(mean_errors), np.array(variance_errors)
+    
+    assert np.allclose(errors['Без возвращения'][0][-1], 0)
+    assert np.allclose(errors['Без возвращения'][1][-1], 0)
+    
+    return errors, sizes
 
-normality = stats.shapiro(difference)
-test = stats.ttest_rel(sodium_glaze, sodium_body)
-interval = test.confidence_interval(confidence_level=0.95)
 
-print(f'Шапиро — Уилк для разностей: p = {normality.pvalue:.4f}')
-print(f'Средняя разность: {difference.mean():.3f} п.п.')
-print(f'Парный t-тест: t = {test.statistic:.3f}, p = {test.pvalue:.4f}')
-print(f'95%-й доверительный интервал: от {interval.low:.3f} до {interval.high:.3f} п.п.')
+def plot_rmse_errors(data, errors, sizes):
+    fig, axes = plt.subplots(4, 2, figsize=(8, 10), layout='constrained', sharex=True)
+    
+    for i, name in enumerate(data.columns):
+        for method, (mean_errors, variance_errors) in errors.items():
+            axes[i, 0].plot(sizes, mean_errors[:, i], 'o-', label=method)
+            axes[i, 1].plot(sizes, variance_errors[:, i], 'o-', label=method)
+        axes[i, 0].set(title=f'{name} · среднее', ylabel='RMSE, п.п.')
+        axes[i, 1].set(title=f'{name} · дисперсия', ylabel='RMSE, (п.п.)²')
+    
+    axes[0, 0].legend(fontsize=8)
+    for ax in axes[-1]:
+        ax.set(xlabel='Размер выборки', xticks=sizes)
+    
+    plt.show()
+
+
+def paired_ttest_analysis(data, col1='Na2O в основе', col2='Na2O в глазури', confidence_level=0.95):
+    series1 = data[col1]
+    series2 = data[col2]
+    difference = series2 - series1
+    
+    normality = stats.shapiro(difference)
+    test = stats.ttest_rel(series2, series1)
+    interval = test.confidence_interval(confidence_level=confidence_level)
+    
+    print(f'Шапиро — Уилк для разностей: p = {normality.pvalue:.4f}')
+    print(f'Средняя разность: {difference.mean():.3f} п.п.')
+    print(f'Парный t-тест: t = {test.statistic:.3f}, p = {test.pvalue:.4f}')
+    print(f'{int(confidence_level*100)}%-й доверительный интервал: от {interval.low:.3f} до {interval.high:.3f} п.п.')
+    
+    return {
+        'shapiro_p': normality.pvalue,
+        'mean_diff': difference.mean(),
+        't_statistic': test.statistic,
+        'p_value': test.pvalue,
+        'ci_low': interval.low,
+        'ci_high': interval.high
+    }
 

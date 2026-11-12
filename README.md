@@ -635,7 +635,7 @@ print(f'95%-й доверительный интервал: от {interval.low:.
 
 ### Математический анализ
 
-Для $X \sim \Gamma(k,\theta)$ плотность и первые два момента равны $$f_X(x)=\frac{x^{k-1}e^{-x/\theta}}{\Gamma(k)\theta^k},\quad x>0; \qquad \operatorname E X=k\\theta,\\quad \operatorname{Var}X=k \theta^2.$$
+Для $X \sim \Gamma(k,\theta)$ плотность и первые два момента равны $$f_X(x)=\frac{x^{k-1}e^{-x/\theta}}{\Gamma(k)\theta^k},\quad x>0; \qquad \mathbb{E}[X]=k\\theta,\\quad \mathrm{Var}[X]=k \theta^2.$$
 Здесь $k$ безразмерен, $\\theta$ измеряется в масс. %, дисперсия — в $(\text{масс. } \%)^2$. Сначала получаем $Y \sim \Gamma(k,1)$, затем $X=\theta Y$. Оценку $k,\theta$ берём из `scipy.stats.gamma.fit(..., floc=0)`; именно такой способ применён в первом спринте.
 Используем **метод принятия и отклонения Марсальи-Цанга**. При $k\ge1$ положим $$d=k-\frac13,\qquad c=\frac1{\sqrt{9d}},\qquad v=(1+cZ)^3,\qquad Z\sim N(0,1).$$
 Если $1+cZ\le0$, кандидат отклоняем. Иначе берём независимое $U\sim U(0,1)$ и принимаем $Y=dv$, когда $$\\ln U<\\frac{Z^2}{2}+d(1-v+\\ln v).$$

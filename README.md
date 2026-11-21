@@ -683,21 +683,3 @@ $$Z=\sqrt{-2\ln U_1}\cos(2\pi U_2),\qquad U_1,U_2\stackrel{\text{ind}}{\sim}U(0,
     историческую керамику.
     
 
-## Запуск проекта
-
-1.  Скачайте CSV-файл с [UC Irvine Machine Learning
-    Repository](https://archive.ics.uci.edu/dataset/583/chemical+composition+of+ceramic+samples).
-2.  Поместите CSV-файл в ту же папку, что и ноутбук.
-3.  Установите необходимые библиотеки:
-
-``` bash
-pip install numpy pandas matplotlib scipy
-```
-
-4.  Откройте ноутбук в Jupyter Notebook или Google Colab и выполните
-    ячейки по порядку.
-
-**Важно:** в коде используется имя файла
-`Chemical Composion of Ceramic.csv` (именно в таком написании оно
-указано в ноутбуке). Если скачанный файл называется иначе, измените имя
-в строке `pd.read_csv(...)`.
